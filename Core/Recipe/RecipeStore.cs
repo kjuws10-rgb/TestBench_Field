@@ -104,6 +104,84 @@ namespace StageWin.Core.Recipe
         [DataMember(Order = 10)] public double ErrY;    // TargetY - MeasY
         [DataMember(Order = 11)] public string Grade;   // "OK" / "NG"
         [DataMember(Order = 12)] public int FindResult;
+        // 다음 PROCESS_SCANNING에 실제 적용할 누적 보정량(mm).
+        // ErrX/ErrY는 이번 Review 측정 오차로 유지하고, 적용값은 별도로 누적한다.
+        [DataMember(Order = 13)] public double AppliedOffsetX;
+        [DataMember(Order = 14)] public double AppliedOffsetY;
+        [DataMember(Order = 15)] public bool HasAppliedOffset;
+
+        public static bool TryGetAppliedOffset(MeasResult result, out double ox, out double oy)
+        {
+            ox = 0.0;
+            oy = 0.0;
+            if (result == null) return false;
+
+            if (result.HasAppliedOffset)
+            {
+                ox = result.AppliedOffsetX;
+                oy = result.AppliedOffsetY;
+                return true;
+            }
+
+            // Legacy fallback: older recipes used ErrX/ErrY directly as offsets.
+            ox = result.ErrX;
+            oy = result.ErrY;
+            return true;
+        }
+
+        public void AccumulateAppliedOffset(MeasResult previous, bool resetAppliedOffsets)
+        {
+            if (resetAppliedOffsets)
+            {
+                AppliedOffsetX = 0.0;
+                AppliedOffsetY = 0.0;
+                HasAppliedOffset = false;
+                return;
+            }
+
+            double prevX = 0.0, prevY = 0.0;
+            bool hasPrevious = TryGetAppliedOffset(previous, out prevX, out prevY);
+
+            if (FindResult == 1)
+            {
+                if (hasPrevious && IsSameMeasurement(previous, this))
+                {
+                    AppliedOffsetX = prevX;
+                    AppliedOffsetY = prevY;
+                    HasAppliedOffset = true;
+                    return;
+                }
+
+                AppliedOffsetX = prevX + ErrX;
+                AppliedOffsetY = prevY + ErrY;
+                HasAppliedOffset = true;
+            }
+            else if (hasPrevious)
+            {
+                AppliedOffsetX = prevX;
+                AppliedOffsetY = prevY;
+                HasAppliedOffset = true;
+            }
+            else
+            {
+                AppliedOffsetX = 0.0;
+                AppliedOffsetY = 0.0;
+                HasAppliedOffset = false;
+            }
+        }
+
+        private static bool IsSameMeasurement(MeasResult previous, MeasResult current)
+        {
+            if (previous == null || current == null) return false;
+            const double eps = 1e-12;
+            return previous.FindResult == current.FindResult
+                && Math.Abs(previous.TargetX - current.TargetX) <= eps
+                && Math.Abs(previous.TargetY - current.TargetY) <= eps
+                && Math.Abs(previous.MeasX - current.MeasX) <= eps
+                && Math.Abs(previous.MeasY - current.MeasY) <= eps
+                && Math.Abs(previous.ErrX - current.ErrX) <= eps
+                && Math.Abs(previous.ErrY - current.ErrY) <= eps;
+        }
     }
 
     [DataContract]

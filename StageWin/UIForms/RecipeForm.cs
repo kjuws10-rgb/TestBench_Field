@@ -426,7 +426,7 @@ namespace StageWin.UI
                 if (MessageBox.Show(this, "모든 Review 결과를 IDLE로 초기화하고 저장할까요?",
                     "Init Review Results", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
                 InitAllReviewResultsToIdle(clearMeasuredXY: true);      // 1) UI _review 초기화 + doc 결과 클리어
-                ApplyAllReviewResultsToDocOffsets(saveToFile: true);    // 2) 현재 _review 상태(IDLE/0)를 Doc에 저장
+                ApplyAllReviewResultsToDocOffsets(saveToFile: true, resetAppliedOffsets: true);    // 2) 현재 _review 상태(IDLE/0)를 Doc에 저장
                 ClearNeedApplyReview();                                 // 3) Apply 버튼 별표/상태도 정상화
                 FireReselectCurrentRecipe(force: true);                 // 4) 리스트/선택 동기화
             };
@@ -1698,16 +1698,13 @@ namespace StageWin.UI
                     string k4 = Key4(line1, hole1, vecR, vecC);
                     if (doc.ResultsVec.TryGetValue(k4, out var rv) && rv != null)
                     {
-                        // ResultsVec.ErrX/ErrY는 mm로 저장된다고 가정(현재 코드 흐름이 그렇게 저장함)
-                        ox = rv.ErrX;
-                        oy = rv.ErrY;
+                        GetAppliedOffsetOrMeasuredErr(rv, out ox, out oy);
                         return true;
                     }
                     string k00 = Key4(line1, hole1, 0, 0);
                     if (doc.ResultsVec.TryGetValue(k00, out var r00) && r00 != null)
                     {
-                        ox = r00.ErrX;   // mm
-                        oy = r00.ErrY;   // mm
+                        GetAppliedOffsetOrMeasuredErr(r00, out ox, out oy);
                         return true;
                     }
                 }
@@ -1717,14 +1714,18 @@ namespace StageWin.UI
                     string k2 = Key2(line1, hole1);
                     if (doc.Results.TryGetValue(k2, out var r2) && r2 != null)
                     {
-                        ox = r2.ErrX;   // mm
-                        oy = r2.ErrY;   // mm
+                        GetAppliedOffsetOrMeasuredErr(r2, out ox, out oy);
                         return true;
                     }
                 }
             }
             catch { }
             return false;
+        }
+
+        private static bool GetAppliedOffsetOrMeasuredErr(MeasResult r, out double ox, out double oy)
+        {
+            return MeasResult.TryGetAppliedOffset(r, out ox, out oy);
         }
         private void PollUi()
         {
@@ -3012,10 +3013,57 @@ namespace StageWin.UI
             gridReview?.Refresh();
             gridReviewDetail?.Refresh();
         }
-        private void ApplyAllReviewResultsToDocOffsets(bool saveToFile)
+        private static MeasResult BuildMeasResultWithAppliedOffset(ReviewRow r, MeasResult previous, bool resetAppliedOffsets)
+        {
+            var result = new MeasResult
+            {
+                Row = r.Row,
+                Col = r.Col,
+                VectorRow = r.VectorRow,
+                VectorCol = r.VectorCol,
+                TargetX = r.TargetX,
+                TargetY = r.TargetY,
+                MeasX = r.MarkX,
+                MeasY = r.MarkY,
+                ErrX = r.ErrX,
+                ErrY = r.ErrY,
+                Grade = r.Grade ?? "",
+                FindResult = r.FindResult
+            };
+
+            result.AccumulateAppliedOffset(previous, resetAppliedOffsets);
+            return result;
+        }
+
+        private static MeasResult SnapshotAppliedOffsetSource(MeasResult source)
+        {
+            if (source == null) return null;
+            return new MeasResult
+            {
+                TargetX = source.TargetX,
+                TargetY = source.TargetY,
+                MeasX = source.MeasX,
+                MeasY = source.MeasY,
+                ErrX = source.ErrX,
+                ErrY = source.ErrY,
+                AppliedOffsetX = source.AppliedOffsetX,
+                AppliedOffsetY = source.AppliedOffsetY,
+                HasAppliedOffset = source.HasAppliedOffset,
+                FindResult = source.FindResult
+            };
+        }
+
+        private void ApplyAllReviewResultsToDocOffsets(bool saveToFile, bool resetAppliedOffsets = false)
         {
             EnsureRebuildIfNeeded(preserve: true, showProgress: false);
             if (_doc == null) return;
+
+            var prevResults = _doc.Results != null
+                ? new Dictionary<string, MeasResult>(_doc.Results, StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, MeasResult>(StringComparer.OrdinalIgnoreCase);
+            var prevResultsVec = _doc.ResultsVec != null
+                ? new Dictionary<string, MeasResult>(_doc.ResultsVec, StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, MeasResult>(StringComparer.OrdinalIgnoreCase);
 
             if (_doc.Results == null) _doc.Results = new Dictionary<string, MeasResult>();
             else _doc.Results.Clear();
@@ -3027,39 +3075,15 @@ namespace StageWin.UI
             for (int i = 0; i < total; i++)
             {
                 var r = _review[i];
-                _doc.ResultsVec[Key4(r.Row, r.Col, r.VectorRow, r.VectorCol)] = new MeasResult
-                {
-                    Row = r.Row,
-                    Col = r.Col,
-                    VectorRow = r.VectorRow,
-                    VectorCol = r.VectorCol,
-                    TargetX = r.TargetX,
-                    TargetY = r.TargetY,
-                    MeasX = r.MarkX,
-                    MeasY = r.MarkY,
-                    ErrX = r.ErrX,
-                    ErrY = r.ErrY,
-                    Grade = r.Grade ?? "",
-                    FindResult = r.FindResult
-                };
+                string k4 = Key4(r.Row, r.Col, r.VectorRow, r.VectorCol);
+                prevResultsVec.TryGetValue(k4, out var prevVec);
+                _doc.ResultsVec[k4] = BuildMeasResultWithAppliedOffset(r, prevVec, resetAppliedOffsets);
 
                 if (r.VectorRow == 0 && r.VectorCol == 0)
                 {
-                    _doc.Results[Key2(r.Row, r.Col)] = new MeasResult
-                    {
-                        Row = r.Row,
-                        Col = r.Col,
-                        VectorRow = 0,
-                        VectorCol = 0,
-                        TargetX = r.TargetX,
-                        TargetY = r.TargetY,
-                        MeasX = r.MarkX,
-                        MeasY = r.MarkY,
-                        ErrX = r.ErrX,
-                        ErrY = r.ErrY,
-                        Grade = r.Grade ?? "",
-                        FindResult = r.FindResult
-                    };
+                    string k2 = Key2(r.Row, r.Col);
+                    prevResults.TryGetValue(k2, out var prevPoint);
+                    _doc.Results[k2] = BuildMeasResultWithAppliedOffset(r, prevPoint, resetAppliedOffsets);
                 }
             }
             gridReviewDetail?.Refresh();
@@ -3367,6 +3391,7 @@ namespace StageWin.UI
             // vec 결과는 ResultsVec에 항상 저장
             string k4 = Key4(rr.Row, rr.Col, rr.VectorRow, rr.VectorCol);
             if (!_doc.ResultsVec.TryGetValue(k4, out var resV) || resV == null) resV = new MeasResult();
+            var prevVec = SnapshotAppliedOffsetSource(resV);
             resV.Row = rr.Row;
             resV.Col = rr.Col;
             resV.VectorRow = rr.VectorRow;
@@ -3379,6 +3404,7 @@ namespace StageWin.UI
             resV.ErrY = rr.ErrY;
             resV.Grade = rr.Grade ?? "";
             resV.FindResult = rr.FindResult;
+            resV.AccumulateAppliedOffset(prevVec, resetAppliedOffsets: false);
 
             _doc.ResultsVec[k4] = resV;
 
@@ -3387,6 +3413,7 @@ namespace StageWin.UI
                 string k2 = Key2(rr.Row, rr.Col);
 
                 if (!_doc.Results.TryGetValue(k2, out var res2) || res2 == null) res2 = new MeasResult();
+                var prevPoint = SnapshotAppliedOffsetSource(res2);
                 res2.Row = rr.Row;
                 res2.Col = rr.Col;
                 res2.VectorRow = 0;
@@ -3399,6 +3426,7 @@ namespace StageWin.UI
                 res2.ErrY = rr.ErrY;
                 res2.Grade = rr.Grade ?? "";
                 res2.FindResult = rr.FindResult;
+                res2.AccumulateAppliedOffset(prevPoint, resetAppliedOffsets: false);
                 _doc.Results[k2] = res2;
             }
         }
