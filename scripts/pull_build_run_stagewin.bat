@@ -3,7 +3,10 @@ setlocal
 
 rem ============================================================
 rem TestBench_Field / StageWin
-rem Run this file from the repository scripts folder.
+rem Expected script folder:
+rem   C:\Users\jwkang01\Downloads\TestBench_Field\scripts
+rem Project root is resolved as:
+rem   C:\Users\jwkang01\Downloads\TestBench_Field
 rem It pulls latest source, builds StageWin.sln, then runs StageWin.exe.
 rem ============================================================
 
@@ -47,7 +50,8 @@ if %errorlevel%==0 (
 
 if not exist ".git" (
     echo This folder is not a Git repository: %CD%
-    echo Expected this script to be located under: ^<repo-root^>\scripts
+    echo Expected this script path:
+    echo C:\Users\jwkang01\Downloads\TestBench_Field\scripts
     echo Repository URL: %REPO_URL%
     popd
     exit /b 1
