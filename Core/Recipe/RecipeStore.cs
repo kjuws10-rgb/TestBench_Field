@@ -100,15 +100,19 @@ namespace StageWin.Core.Recipe
         [DataMember(Order = 6)] public double TargetY; // px
         [DataMember(Order = 7)] public double MeasX;   // px (≒ MarkX)
         [DataMember(Order = 8)] public double MeasY;   // px (≒ MarkY)
-        [DataMember(Order = 9)] public double ErrX;    // TargetX - MeasX
-        [DataMember(Order = 10)] public double ErrY;    // TargetY - MeasY
+        [DataMember(Order = 9)] public double ErrX;    // Applied offset X (mm) after accumulation
+        [DataMember(Order = 10)] public double ErrY;    // Applied offset Y (mm) after accumulation
         [DataMember(Order = 11)] public string Grade;   // "OK" / "NG"
         [DataMember(Order = 12)] public int FindResult;
         // 다음 PROCESS_SCANNING에 실제 적용할 누적 보정량(mm).
-        // ErrX/ErrY는 이번 Review 측정 오차로 유지하고, 적용값은 별도로 누적한다.
+        // 기존 offset 경로 호환을 위해 ErrX/ErrY에도 같은 누적값을 저장한다.
         [DataMember(Order = 13)] public double AppliedOffsetX;
         [DataMember(Order = 14)] public double AppliedOffsetY;
         [DataMember(Order = 15)] public bool HasAppliedOffset;
+        // 이번 Review에서 Vision으로 측정한 원 오차(mm). 누적 계산/중복 적용 방지용.
+        [DataMember(Order = 16)] public double MeasuredErrX;
+        [DataMember(Order = 17)] public double MeasuredErrY;
+        [DataMember(Order = 18)] public bool HasMeasuredErr;
 
         public static bool TryGetAppliedOffset(MeasResult result, out double ox, out double oy)
         {
@@ -131,11 +135,15 @@ namespace StageWin.Core.Recipe
 
         public void AccumulateAppliedOffset(MeasResult previous, bool resetAppliedOffsets)
         {
+            CaptureMeasuredErrorFromCurrentErr();
+
             if (resetAppliedOffsets)
             {
                 AppliedOffsetX = 0.0;
                 AppliedOffsetY = 0.0;
                 HasAppliedOffset = false;
+                ErrX = 0.0;
+                ErrY = 0.0;
                 return;
             }
 
@@ -149,25 +157,42 @@ namespace StageWin.Core.Recipe
                     AppliedOffsetX = prevX;
                     AppliedOffsetY = prevY;
                     HasAppliedOffset = true;
+                    ErrX = AppliedOffsetX;
+                    ErrY = AppliedOffsetY;
                     return;
                 }
 
-                AppliedOffsetX = prevX + ErrX;
-                AppliedOffsetY = prevY + ErrY;
+                AppliedOffsetX = prevX + MeasuredErrX;
+                AppliedOffsetY = prevY + MeasuredErrY;
                 HasAppliedOffset = true;
+                ErrX = AppliedOffsetX;
+                ErrY = AppliedOffsetY;
             }
             else if (hasPrevious)
             {
                 AppliedOffsetX = prevX;
                 AppliedOffsetY = prevY;
                 HasAppliedOffset = true;
+                ErrX = AppliedOffsetX;
+                ErrY = AppliedOffsetY;
             }
             else
             {
                 AppliedOffsetX = 0.0;
                 AppliedOffsetY = 0.0;
                 HasAppliedOffset = false;
+                ErrX = 0.0;
+                ErrY = 0.0;
             }
+        }
+
+        private void CaptureMeasuredErrorFromCurrentErr()
+        {
+            if (FindResult != 1 || HasMeasuredErr) return;
+
+            MeasuredErrX = ErrX;
+            MeasuredErrY = ErrY;
+            HasMeasuredErr = true;
         }
 
         private static bool IsSameMeasurement(MeasResult previous, MeasResult current)
@@ -179,8 +204,18 @@ namespace StageWin.Core.Recipe
                 && Math.Abs(previous.TargetY - current.TargetY) <= eps
                 && Math.Abs(previous.MeasX - current.MeasX) <= eps
                 && Math.Abs(previous.MeasY - current.MeasY) <= eps
-                && Math.Abs(previous.ErrX - current.ErrX) <= eps
-                && Math.Abs(previous.ErrY - current.ErrY) <= eps;
+                && Math.Abs(GetMeasuredErrX(previous) - GetMeasuredErrX(current)) <= eps
+                && Math.Abs(GetMeasuredErrY(previous) - GetMeasuredErrY(current)) <= eps;
+        }
+
+        private static double GetMeasuredErrX(MeasResult result)
+        {
+            return result.HasMeasuredErr ? result.MeasuredErrX : result.ErrX;
+        }
+
+        private static double GetMeasuredErrY(MeasResult result)
+        {
+            return result.HasMeasuredErr ? result.MeasuredErrY : result.ErrY;
         }
     }
 

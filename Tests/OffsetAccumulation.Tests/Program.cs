@@ -45,7 +45,12 @@ namespace OffsetAccumulation.Tests
 
             AssertNear(0.013, current.AppliedOffsetX, "success accumulates X");
             AssertNear(-0.016, current.AppliedOffsetY, "success accumulates Y");
+            AssertNear(0.013, current.ErrX, "success stores accumulated X in ErrX");
+            AssertNear(-0.016, current.ErrY, "success stores accumulated Y in ErrY");
+            AssertNear(0.003, current.MeasuredErrX, "success preserves measured X");
+            AssertNear(0.004, current.MeasuredErrY, "success preserves measured Y");
             AssertTrue(current.HasAppliedOffset, "success marks applied offset");
+            AssertTrue(current.HasMeasuredErr, "success marks measured error");
         }
 
         private static void ReapplyingSameMeasurementDoesNotDoubleAccumulate()
@@ -57,8 +62,11 @@ namespace OffsetAccumulation.Tests
                 TargetY = 20.0,
                 MeasX = 9.7,
                 MeasY = 19.6,
-                ErrX = 0.003,
-                ErrY = 0.004,
+                ErrX = 0.013,
+                ErrY = -0.016,
+                MeasuredErrX = 0.003,
+                MeasuredErrY = 0.004,
+                HasMeasuredErr = true,
                 AppliedOffsetX = 0.013,
                 AppliedOffsetY = -0.016,
                 HasAppliedOffset = true
@@ -78,6 +86,10 @@ namespace OffsetAccumulation.Tests
 
             AssertNear(0.013, current.AppliedOffsetX, "same measurement preserves X");
             AssertNear(-0.016, current.AppliedOffsetY, "same measurement preserves Y");
+            AssertNear(0.013, current.ErrX, "same measurement stores applied X in ErrX");
+            AssertNear(-0.016, current.ErrY, "same measurement stores applied Y in ErrY");
+            AssertNear(0.003, current.MeasuredErrX, "same measurement preserves measured X");
+            AssertNear(0.004, current.MeasuredErrY, "same measurement preserves measured Y");
             AssertTrue(current.HasAppliedOffset, "same measurement keeps applied flag");
         }
 
@@ -100,6 +112,8 @@ namespace OffsetAccumulation.Tests
 
             AssertNear(0.010, current.AppliedOffsetX, "failure preserves X");
             AssertNear(-0.020, current.AppliedOffsetY, "failure preserves Y");
+            AssertNear(0.010, current.ErrX, "failure stores preserved X in ErrX");
+            AssertNear(-0.020, current.ErrY, "failure stores preserved Y in ErrY");
             AssertTrue(current.HasAppliedOffset, "failure preserves applied flag");
         }
 
@@ -122,6 +136,8 @@ namespace OffsetAccumulation.Tests
 
             AssertNear(0.015, current.AppliedOffsetX, "legacy fallback accumulates X");
             AssertNear(0.037, current.AppliedOffsetY, "legacy fallback accumulates Y");
+            AssertNear(0.015, current.ErrX, "legacy fallback stores accumulated X in ErrX");
+            AssertNear(0.037, current.ErrY, "legacy fallback stores accumulated Y in ErrY");
             AssertTrue(current.HasAppliedOffset, "legacy fallback marks applied offset");
         }
 
@@ -144,6 +160,8 @@ namespace OffsetAccumulation.Tests
 
             AssertNear(0.0, current.AppliedOffsetX, "reset clears X");
             AssertNear(0.0, current.AppliedOffsetY, "reset clears Y");
+            AssertNear(0.0, current.ErrX, "reset clears ErrX offset");
+            AssertNear(0.0, current.ErrY, "reset clears ErrY offset");
             AssertTrue(!current.HasAppliedOffset, "reset clears applied flag");
         }
 

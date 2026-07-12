@@ -3027,6 +3027,9 @@ namespace StageWin.UI
                 MeasY = r.MarkY,
                 ErrX = r.ErrX,
                 ErrY = r.ErrY,
+                MeasuredErrX = r.ErrX,
+                MeasuredErrY = r.ErrY,
+                HasMeasuredErr = r.FindResult == 1,
                 Grade = r.Grade ?? "",
                 FindResult = r.FindResult
             };
@@ -3049,6 +3052,9 @@ namespace StageWin.UI
                 AppliedOffsetX = source.AppliedOffsetX,
                 AppliedOffsetY = source.AppliedOffsetY,
                 HasAppliedOffset = source.HasAppliedOffset,
+                MeasuredErrX = source.MeasuredErrX,
+                MeasuredErrY = source.MeasuredErrY,
+                HasMeasuredErr = source.HasMeasuredErr,
                 FindResult = source.FindResult
             };
         }
@@ -3402,6 +3408,9 @@ namespace StageWin.UI
             resV.MeasY = rr.MarkY;
             resV.ErrX = rr.ErrX;
             resV.ErrY = rr.ErrY;
+            resV.MeasuredErrX = rr.ErrX;
+            resV.MeasuredErrY = rr.ErrY;
+            resV.HasMeasuredErr = rr.FindResult == 1;
             resV.Grade = rr.Grade ?? "";
             resV.FindResult = rr.FindResult;
             resV.AccumulateAppliedOffset(prevVec, resetAppliedOffsets: false);
@@ -3424,6 +3433,9 @@ namespace StageWin.UI
                 res2.MeasY = rr.MarkY;
                 res2.ErrX = rr.ErrX;
                 res2.ErrY = rr.ErrY;
+                res2.MeasuredErrX = rr.ErrX;
+                res2.MeasuredErrY = rr.ErrY;
+                res2.HasMeasuredErr = rr.FindResult == 1;
                 res2.Grade = rr.Grade ?? "";
                 res2.FindResult = rr.FindResult;
                 res2.AccumulateAppliedOffset(prevPoint, resetAppliedOffsets: false);
