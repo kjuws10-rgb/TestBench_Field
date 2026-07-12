@@ -16,6 +16,7 @@ namespace OffsetAccumulation.Tests
                 PreservesPreviousOffsetOnFailedMeasurement();
                 UsesLegacyErrAsPreviousOffset();
                 ResetClearsAppliedOffset();
+                SetAppliedOffsetStoresFinalOffsetForLegacyConsumers();
                 Console.WriteLine("Offset accumulation tests passed.");
                 return 0;
             }
@@ -163,6 +164,24 @@ namespace OffsetAccumulation.Tests
             AssertNear(0.0, current.ErrX, "reset clears ErrX offset");
             AssertNear(0.0, current.ErrY, "reset clears ErrY offset");
             AssertTrue(!current.HasAppliedOffset, "reset clears applied flag");
+        }
+
+        private static void SetAppliedOffsetStoresFinalOffsetForLegacyConsumers()
+        {
+            var result = new MeasResult
+            {
+                FindResult = 1,
+                ErrX = 0.001,
+                ErrY = 0.002
+            };
+
+            result.SetAppliedOffset(0.123, -0.456);
+
+            AssertNear(0.123, result.AppliedOffsetX, "set applied offset X");
+            AssertNear(-0.456, result.AppliedOffsetY, "set applied offset Y");
+            AssertNear(0.123, result.ErrX, "set applied offset stores X in ErrX");
+            AssertNear(-0.456, result.ErrY, "set applied offset stores Y in ErrY");
+            AssertTrue(result.HasAppliedOffset, "set applied offset marks applied flag");
         }
 
         private static void AssertNear(double expected, double actual, string name)

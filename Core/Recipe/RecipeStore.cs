@@ -186,6 +186,15 @@ namespace StageWin.Core.Recipe
             }
         }
 
+        public void SetAppliedOffset(double offsetX, double offsetY)
+        {
+            AppliedOffsetX = offsetX;
+            AppliedOffsetY = offsetY;
+            HasAppliedOffset = true;
+            ErrX = offsetX;
+            ErrY = offsetY;
+        }
+
         private void CaptureMeasuredErrorFromCurrentErr()
         {
             if (FindResult != 1 || HasMeasuredErr) return;

@@ -313,6 +313,7 @@ namespace StageWin.UI
         private ContextMenuStrip _ctxGrade;
         private ToolStripMenuItem _miGradeIDLE;
         private ToolStripMenuItem _miManualInspection;
+        private ToolStripMenuItem _miStartBatchOffsetApply;
 
         private bool _needRebuild = false;
         private Color _rebuildBtnBack;
@@ -325,9 +326,16 @@ namespace StageWin.UI
         private readonly Color _clrNgBack = Color.OrangeRed;
         private readonly Color _clrNgFore = Color.White;
         private readonly Color _clrRunBack = Color.Gold;        // 동작중 하이라이트
+        private readonly Color _clrBatchTargetBack = Color.DeepSkyBlue;
+        private readonly Color _clrBatchSourceBack = Color.Orange;
         private bool _needApplyReview = false;
         private Color _applyBtnBack;
         private string _applyBtnText;
+        private bool _batchOffsetApplyMode = false;
+        private Cell _batchOffsetSourceCell;
+        private double _batchOffsetSourceX;
+        private double _batchOffsetSourceY;
+        private readonly HashSet<string> _batchOffsetTargetKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private struct ReviewState
         {
             public double TargetX, TargetY;
@@ -432,6 +440,12 @@ namespace StageWin.UI
             };
             btnApplyReviewResult.Click += (s, e) =>
             {
+                if (_batchOffsetApplyMode)
+                {
+                    ApplyBatchOffsetTargets();
+                    return;
+                }
+
                 if (!_needApplyReview)
                 {
                     MessageBox.Show(this, "적용할 변경사항이 없습니다.", "Apply Review Results", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -450,6 +464,7 @@ namespace StageWin.UI
             gridReview.CellFormatting += GridReviewMap_CellFormatting;
             gridReview.CellClick += GridReviewMap_CellClick;
             gridReviewDetail.CellFormatting += GridReview_CellFormatting;
+            gridReviewDetail.CellClick += GridReviewDetail_CellClick;
             gridReview.CellDoubleClick += GridReviewMap_CellDoubleClick;
 
 
@@ -659,9 +674,11 @@ namespace StageWin.UI
 
             _miGradeIDLE = new ToolStripMenuItem("Set Grade = IDLE (Clear)");
             _miManualInspection = new ToolStripMenuItem("Set Manual Inspection");
+            _miStartBatchOffsetApply = new ToolStripMenuItem("Batch Apply Offset From This Cell");
             _miGradeIDLE.Click += (s, e) => ForceSetIdleAndClearOnCurrent();
             _miManualInspection.Click += async (s, e) => { await DoManualInspectionFromVisionAsync(); };
-            _ctxGrade.Items.AddRange(new ToolStripItem[] { _miGradeIDLE, new ToolStripSeparator(), _miManualInspection, });
+            _miStartBatchOffsetApply.Click += (s, e) => StartBatchOffsetApplyFromCurrentCell();
+            _ctxGrade.Items.AddRange(new ToolStripItem[] { _miGradeIDLE, new ToolStripSeparator(), _miManualInspection, new ToolStripSeparator(), _miStartBatchOffsetApply, });
             // 상세 그리드에서 우클릭
             gridReviewDetail.CellMouseDown += (s, e) =>
             {
@@ -684,6 +701,210 @@ namespace StageWin.UI
                 _ctxGrade.Show(Cursor.Position);
             };
         }
+        private void StartBatchOffsetApplyFromCurrentCell()
+        {
+            var src = CurrentSelectedReviewRow();
+            if (src == null)
+            {
+                MessageBox.Show(this, "기준 offset 셀을 먼저 선택하세요.", "Batch Apply Offset", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            if (!TryGetCurrentAppliedOffset(src, out _batchOffsetSourceX, out _batchOffsetSourceY))
+            {
+                MessageBox.Show(this, "선택한 셀에서 적용할 offset 값을 찾을 수 없습니다.", "Batch Apply Offset", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            _batchOffsetSourceCell = new Cell { Row = src.Row, Col = src.Col, VecR = src.VectorRow, VecC = src.VectorCol };
+            _batchOffsetTargetKeys.Clear();
+            _batchOffsetApplyMode = true;
+            UpdateBatchOffsetApplyButton();
+            gridReviewDetail?.Refresh();
+            gridReview?.Refresh();
+
+            MessageBox.Show(this,
+                "일괄 적용할 셀들을 클릭해서 선택하세요.\r\n선택된 셀은 파란색으로 표시됩니다.\r\n선택이 끝나면 Apply Review Results 버튼을 누르세요.",
+                "Batch Apply Offset", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        private ReviewRow CurrentSelectedReviewRow()
+        {
+            if (gridReviewDetail?.CurrentRow?.DataBoundItem is ReviewRow rr) return rr;
+
+            var sel = this.SelectedCell;
+            return _review.FirstOrDefault(x =>
+                x.Row == sel.Row && x.Col == sel.Col &&
+                x.VectorRow == sel.VecR && x.VectorCol == sel.VecC);
+        }
+
+        private bool TryGetCurrentAppliedOffset(ReviewRow rr, out double ox, out double oy)
+        {
+            ox = 0.0;
+            oy = 0.0;
+            if (rr == null) return false;
+
+            if (_doc?.ResultsVec != null &&
+                _doc.ResultsVec.TryGetValue(Key4(rr.Row, rr.Col, rr.VectorRow, rr.VectorCol), out var rv) &&
+                MeasResult.TryGetAppliedOffset(rv, out ox, out oy))
+                return true;
+
+            if (rr.VectorRow == 0 && rr.VectorCol == 0 &&
+                _doc?.Results != null &&
+                _doc.Results.TryGetValue(Key2(rr.Row, rr.Col), out var r2) &&
+                MeasResult.TryGetAppliedOffset(r2, out ox, out oy))
+                return true;
+
+            ox = rr.ErrX;
+            oy = rr.ErrY;
+            return rr.FindResult == 1 || rr.ErrX != 0.0 || rr.ErrY != 0.0;
+        }
+
+        private void ToggleBatchOffsetTarget(Cell cell)
+        {
+            if (!_batchOffsetApplyMode) return;
+
+            string key = Key4(cell.Row, cell.Col, cell.VecR, cell.VecC);
+            if (key == Key4(_batchOffsetSourceCell.Row, _batchOffsetSourceCell.Col, _batchOffsetSourceCell.VecR, _batchOffsetSourceCell.VecC))
+                return;
+
+            if (!_batchOffsetTargetKeys.Add(key)) _batchOffsetTargetKeys.Remove(key);
+            UpdateBatchOffsetApplyButton();
+            gridReviewDetail?.Refresh();
+            gridReview?.Refresh();
+        }
+
+        private void ApplyBatchOffsetTargets()
+        {
+            if (!_batchOffsetApplyMode) return;
+
+            if (_batchOffsetTargetKeys.Count == 0)
+            {
+                MessageBox.Show(this, "일괄 적용할 대상 셀을 선택하세요.", "Batch Apply Offset", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            if (MessageBox.Show(this,
+                $"선택한 {_batchOffsetTargetKeys.Count}개 셀에 기준 offset X={_batchOffsetSourceX:0.######}, Y={_batchOffsetSourceY:0.######} mm 를 적용하고 저장할까요?",
+                "Batch Apply Offset", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+                return;
+
+            EnsureRebuildIfNeeded(preserve: true, showProgress: false);
+            if (_doc == null) return;
+
+            int applied = 0;
+            foreach (string key in _batchOffsetTargetKeys.ToArray())
+            {
+                if (!TryParseKey(key, out int r, out int c, out int vr, out int vc, out bool isVecKey)) continue;
+                var rr = _review.FirstOrDefault(x => x.Row == r && x.Col == c && x.VectorRow == vr && x.VectorCol == vc);
+                if (rr == null) continue;
+
+                rr.ErrX = _batchOffsetSourceX;
+                rr.ErrY = _batchOffsetSourceY;
+                rr.FindResult = 1;
+                rr.Grade = "OK";
+                UpsertForcedAppliedOffsetToDoc(rr, _batchOffsetSourceX, _batchOffsetSourceY);
+                applied++;
+            }
+
+            try
+            {
+                var st = CurrentStore ?? new RecipeStore(AppConfig.Current.LocalRecipeDirPath);
+                st.Save(_doc);
+                RecipeSaved?.Invoke(_doc.Header.Name);
+                ClearNeedApplyReview();
+                EndBatchOffsetApplyMode();
+                FireReselectCurrentRecipe(force: true);
+                gridReviewDetail?.Refresh();
+                RefreshReviewMap();
+                MessageBox.Show(this, $"{applied}개 셀에 offset을 일괄 적용했습니다.", "Batch Apply Offset", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("[BatchApplyOffset] Save failed", ex);
+                MessageBox.Show(this, ex.Message, "Batch Apply Offset", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void UpsertForcedAppliedOffsetToDoc(ReviewRow rr, double offsetX, double offsetY)
+        {
+            if (_doc == null || rr == null) return;
+            if (_doc.Results == null) _doc.Results = new Dictionary<string, MeasResult>();
+            if (_doc.ResultsVec == null) _doc.ResultsVec = new Dictionary<string, MeasResult>();
+
+            string k4 = Key4(rr.Row, rr.Col, rr.VectorRow, rr.VectorCol);
+            var resV = BuildForcedAppliedOffsetResult(rr, offsetX, offsetY);
+            _doc.ResultsVec[k4] = resV;
+
+            if (rr.VectorRow == 0 && rr.VectorCol == 0)
+            {
+                string k2 = Key2(rr.Row, rr.Col);
+                _doc.Results[k2] = BuildForcedAppliedOffsetResult(rr, offsetX, offsetY);
+            }
+        }
+
+        private static MeasResult BuildForcedAppliedOffsetResult(ReviewRow rr, double offsetX, double offsetY)
+        {
+            var result = new MeasResult
+            {
+                Row = rr.Row,
+                Col = rr.Col,
+                VectorRow = rr.VectorRow,
+                VectorCol = rr.VectorCol,
+                TargetX = rr.TargetX,
+                TargetY = rr.TargetY,
+                MeasX = rr.MarkX,
+                MeasY = rr.MarkY,
+                Grade = rr.Grade ?? "OK",
+                FindResult = 1,
+                HasMeasuredErr = false,
+                MeasuredErrX = 0.0,
+                MeasuredErrY = 0.0
+            };
+            result.SetAppliedOffset(offsetX, offsetY);
+            return result;
+        }
+
+        private void EndBatchOffsetApplyMode()
+        {
+            _batchOffsetApplyMode = false;
+            _batchOffsetTargetKeys.Clear();
+            UpdateBatchOffsetApplyButton();
+            gridReviewDetail?.Refresh();
+            gridReview?.Refresh();
+        }
+
+        private void UpdateBatchOffsetApplyButton()
+        {
+            if (btnApplyReviewResult == null) return;
+            if (_applyBtnText == null) _applyBtnText = btnApplyReviewResult.Text;
+            if (_applyBtnBack == default) _applyBtnBack = btnApplyReviewResult.BackColor;
+
+            if (_batchOffsetApplyMode)
+            {
+                btnApplyReviewResult.Text = $"Apply Batch Offset ({_batchOffsetTargetKeys.Count})";
+                btnApplyReviewResult.BackColor = _clrBatchTargetBack;
+            }
+            else
+            {
+                if (!string.IsNullOrEmpty(_applyBtnText)) btnApplyReviewResult.Text = _applyBtnText;
+                if (_applyBtnBack != default) btnApplyReviewResult.BackColor = _applyBtnBack;
+            }
+        }
+
+        private bool IsBatchOffsetSource(ReviewRow rr)
+        {
+            if (!_batchOffsetApplyMode || rr == null) return false;
+            return rr.Row == _batchOffsetSourceCell.Row && rr.Col == _batchOffsetSourceCell.Col &&
+                   rr.VectorRow == _batchOffsetSourceCell.VecR && rr.VectorCol == _batchOffsetSourceCell.VecC;
+        }
+
+        private bool IsBatchOffsetTarget(ReviewRow rr)
+        {
+            if (!_batchOffsetApplyMode || rr == null) return false;
+            return _batchOffsetTargetKeys.Contains(Key4(rr.Row, rr.Col, rr.VectorRow, rr.VectorCol));
+        }
+
         private void UpdateToolingButtonEnabled()
         {
             if (_btnToolingEditor == null) return;
@@ -3997,6 +4218,20 @@ namespace StageWin.UI
                 $"{y:F3}{Environment.NewLine}" +
                 $"{gradeShort}";
 
+            if (IsBatchOffsetSource(rr))
+            {
+                e.CellStyle.BackColor = _clrBatchSourceBack;
+                e.CellStyle.ForeColor = Color.Black;
+                return;
+            }
+
+            if (IsBatchOffsetTarget(rr))
+            {
+                e.CellStyle.BackColor = _clrBatchTargetBack;
+                e.CellStyle.ForeColor = Color.White;
+                return;
+            }
+
             if (hasTag)
             {
                 var rf = _doc?.Parameters?.ReviewFlying;
@@ -4034,8 +4269,23 @@ namespace StageWin.UI
             var rr = gridReviewDetail.Rows[e.RowIndex].DataBoundItem as ReviewRow;
             if (rr == null) return;
             var colName = gridReviewDetail.Columns[e.ColumnIndex].Name;
-            if (colName != "colRGrade") return;
             string gradeShort = GetDisplayGrade(rr);
+            if (IsBatchOffsetSource(rr))
+            {
+                if (colName == "colRGrade") e.Value = gradeShort;
+                e.CellStyle.BackColor = _clrBatchSourceBack;
+                e.CellStyle.ForeColor = Color.Black;
+                return;
+            }
+            else if (IsBatchOffsetTarget(rr))
+            {
+                if (colName == "colRGrade") e.Value = gradeShort;
+                e.CellStyle.BackColor = _clrBatchTargetBack;
+                e.CellStyle.ForeColor = Color.White;
+                return;
+            }
+
+            if (colName != "colRGrade") return;
             bool isIdle = (gradeShort == "IDLE");
             if (isIdle)
             {
@@ -4055,6 +4305,13 @@ namespace StageWin.UI
                 e.CellStyle.BackColor = _clrNgBack;
                 e.CellStyle.ForeColor = _clrNgFore;
             }
+        }
+        private void GridReviewDetail_CellClick(object sender, DataGridViewCellEventArgs e)
+        {
+            if (!_batchOffsetApplyMode || e.RowIndex < 0) return;
+            var rr = gridReviewDetail.Rows[e.RowIndex].DataBoundItem as ReviewRow;
+            if (rr == null) return;
+            ToggleBatchOffsetTarget(new Cell { Row = rr.Row, Col = rr.Col, VecR = rr.VectorRow, VecC = rr.VectorCol });
         }
         private void GridReviewMap_CellClick(object sender, DataGridViewCellEventArgs e)
         {
@@ -4078,6 +4335,12 @@ namespace StageWin.UI
                 vr = (e.RowIndex % _reviewVecRows);
                 vc = ((e.ColumnIndex - 1) % _reviewVecCols);
             }
+            if (_batchOffsetApplyMode)
+            {
+                ToggleBatchOffsetTarget(new Cell { Row = line1, Col = hole1, VecR = vr, VecC = vc });
+                return;
+            }
+
             _lastSelectedCell = new Cell { Row = line1, Col = hole1, VecR = vr, VecC = vc };
             RestoreReviewSelection(line1, hole1, vr, vc);
             UpdateVisionFlyLinesMax();
