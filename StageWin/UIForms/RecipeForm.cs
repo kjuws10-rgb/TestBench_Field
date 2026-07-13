@@ -336,6 +336,10 @@ namespace StageWin.UI
         private double _batchOffsetSourceX;
         private double _batchOffsetSourceY;
         private readonly HashSet<string> _batchOffsetTargetKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private bool _batchOffsetDragActive = false;
+        private bool _batchOffsetDragSelect = true;
+        private bool _batchOffsetSuppressNextClick = false;
+        private readonly HashSet<string> _batchOffsetDragVisitedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private struct ReviewState
         {
             public double TargetX, TargetY;
@@ -463,8 +467,14 @@ namespace StageWin.UI
             gridScan.CellFormatting += GridScan_CellFormatting;
             gridReview.CellFormatting += GridReviewMap_CellFormatting;
             gridReview.CellClick += GridReviewMap_CellClick;
+            gridReview.CellMouseDown += GridReviewMap_CellMouseDownForBatchOffset;
+            gridReview.CellMouseEnter += GridReviewMap_CellMouseEnterForBatchOffset;
+            gridReview.MouseUp += GridReviewBatchOffset_MouseUp;
             gridReviewDetail.CellFormatting += GridReview_CellFormatting;
             gridReviewDetail.CellClick += GridReviewDetail_CellClick;
+            gridReviewDetail.CellMouseDown += GridReviewDetail_CellMouseDownForBatchOffset;
+            gridReviewDetail.CellMouseEnter += GridReviewDetail_CellMouseEnterForBatchOffset;
+            gridReviewDetail.MouseUp += GridReviewBatchOffset_MouseUp;
             gridReview.CellDoubleClick += GridReviewMap_CellDoubleClick;
 
 
@@ -772,6 +782,53 @@ namespace StageWin.UI
             UpdateBatchOffsetApplyButton();
             gridReviewDetail?.Refresh();
             gridReview?.Refresh();
+        }
+
+        private void SetBatchOffsetTarget(Cell cell, bool selected)
+        {
+            if (!_batchOffsetApplyMode) return;
+
+            string key = Key4(cell.Row, cell.Col, cell.VecR, cell.VecC);
+            if (key == Key4(_batchOffsetSourceCell.Row, _batchOffsetSourceCell.Col, _batchOffsetSourceCell.VecR, _batchOffsetSourceCell.VecC))
+                return;
+
+            if (selected) _batchOffsetTargetKeys.Add(key);
+            else _batchOffsetTargetKeys.Remove(key);
+        }
+
+        private bool IsBatchOffsetTargetKey(Cell cell)
+        {
+            return _batchOffsetTargetKeys.Contains(Key4(cell.Row, cell.Col, cell.VecR, cell.VecC));
+        }
+
+        private void BeginBatchOffsetDrag(Cell cell)
+        {
+            if (!_batchOffsetApplyMode) return;
+
+            _batchOffsetDragActive = true;
+            _batchOffsetSuppressNextClick = true;
+            _batchOffsetDragVisitedKeys.Clear();
+            _batchOffsetDragSelect = !IsBatchOffsetTargetKey(cell);
+            ApplyBatchOffsetDragCell(cell);
+        }
+
+        private void ApplyBatchOffsetDragCell(Cell cell)
+        {
+            if (!_batchOffsetApplyMode || !_batchOffsetDragActive) return;
+
+            string key = Key4(cell.Row, cell.Col, cell.VecR, cell.VecC);
+            if (!_batchOffsetDragVisitedKeys.Add(key)) return;
+
+            SetBatchOffsetTarget(cell, _batchOffsetDragSelect);
+            UpdateBatchOffsetApplyButton();
+            gridReviewDetail?.Refresh();
+            gridReview?.Refresh();
+        }
+
+        private void EndBatchOffsetDrag()
+        {
+            _batchOffsetDragActive = false;
+            _batchOffsetDragVisitedKeys.Clear();
         }
 
         private void ApplyBatchOffsetTargets()
@@ -4309,10 +4366,44 @@ namespace StageWin.UI
         private void GridReviewDetail_CellClick(object sender, DataGridViewCellEventArgs e)
         {
             if (!_batchOffsetApplyMode || e.RowIndex < 0) return;
+            if (_batchOffsetSuppressNextClick)
+            {
+                _batchOffsetSuppressNextClick = false;
+                return;
+            }
+
             var rr = gridReviewDetail.Rows[e.RowIndex].DataBoundItem as ReviewRow;
             if (rr == null) return;
             ToggleBatchOffsetTarget(new Cell { Row = rr.Row, Col = rr.Col, VecR = rr.VectorRow, VecC = rr.VectorCol });
         }
+
+        private void GridReviewDetail_CellMouseDownForBatchOffset(object sender, DataGridViewCellMouseEventArgs e)
+        {
+            if (!_batchOffsetApplyMode || e.Button != MouseButtons.Left || e.RowIndex < 0) return;
+            var rr = gridReviewDetail.Rows[e.RowIndex].DataBoundItem as ReviewRow;
+            if (rr == null) return;
+            BeginBatchOffsetDrag(new Cell { Row = rr.Row, Col = rr.Col, VecR = rr.VectorRow, VecC = rr.VectorCol });
+        }
+
+        private void GridReviewDetail_CellMouseEnterForBatchOffset(object sender, DataGridViewCellEventArgs e)
+        {
+            if (!_batchOffsetApplyMode || !_batchOffsetDragActive || e.RowIndex < 0) return;
+            if ((Control.MouseButtons & MouseButtons.Left) != MouseButtons.Left)
+            {
+                EndBatchOffsetDrag();
+                return;
+            }
+
+            var rr = gridReviewDetail.Rows[e.RowIndex].DataBoundItem as ReviewRow;
+            if (rr == null) return;
+            ApplyBatchOffsetDragCell(new Cell { Row = rr.Row, Col = rr.Col, VecR = rr.VectorRow, VecC = rr.VectorCol });
+        }
+
+        private void GridReviewBatchOffset_MouseUp(object sender, MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left) EndBatchOffsetDrag();
+        }
+
         private void GridReviewMap_CellClick(object sender, DataGridViewCellEventArgs e)
         {
             if (e.RowIndex < 0 || e.ColumnIndex < 1) return;   // 0번 컬럼(Stage Point 라벨) 제외
@@ -4337,6 +4428,12 @@ namespace StageWin.UI
             }
             if (_batchOffsetApplyMode)
             {
+                if (_batchOffsetSuppressNextClick)
+                {
+                    _batchOffsetSuppressNextClick = false;
+                    return;
+                }
+
                 ToggleBatchOffsetTarget(new Cell { Row = line1, Col = hole1, VecR = vr, VecC = vc });
                 return;
             }
@@ -4345,6 +4442,50 @@ namespace StageWin.UI
             RestoreReviewSelection(line1, hole1, vr, vc);
             UpdateVisionFlyLinesMax();
         }
+
+        private void GridReviewMap_CellMouseDownForBatchOffset(object sender, DataGridViewCellMouseEventArgs e)
+        {
+            if (!_batchOffsetApplyMode || e.Button != MouseButtons.Left || e.RowIndex < 0 || e.ColumnIndex < 1) return;
+            if (!TryGetReviewMapCell(e.RowIndex, e.ColumnIndex, out var cell)) return;
+            BeginBatchOffsetDrag(cell);
+        }
+
+        private void GridReviewMap_CellMouseEnterForBatchOffset(object sender, DataGridViewCellEventArgs e)
+        {
+            if (!_batchOffsetApplyMode || !_batchOffsetDragActive || e.RowIndex < 0 || e.ColumnIndex < 1) return;
+            if ((Control.MouseButtons & MouseButtons.Left) != MouseButtons.Left)
+            {
+                EndBatchOffsetDrag();
+                return;
+            }
+            if (!TryGetReviewMapCell(e.RowIndex, e.ColumnIndex, out var cell)) return;
+            ApplyBatchOffsetDragCell(cell);
+        }
+
+        private bool TryGetReviewMapCell(int rowIndex, int columnIndex, out Cell result)
+        {
+            result = new Cell();
+            if (gridReview == null || rowIndex < 0 || columnIndex < 1) return false;
+
+            var gridCell = gridReview[columnIndex, rowIndex];
+            if (gridCell?.Tag is ReviewMapTag tag)
+            {
+                result = new Cell { Row = tag.Line1, Col = tag.Hole1, VecR = tag.Vr, VecC = tag.Vc };
+                return true;
+            }
+
+            if (_reviewVecRows <= 0 || _reviewVecCols <= 0) return false;
+
+            result = new Cell
+            {
+                Row = ((columnIndex - 1) / _reviewVecCols) + 1,
+                Col = (rowIndex / _reviewVecRows) + 1,
+                VecR = rowIndex % _reviewVecRows,
+                VecC = (columnIndex - 1) % _reviewVecCols
+            };
+            return true;
+        }
+
         private void GridReviewMap_CellDoubleClick(object sender, DataGridViewCellEventArgs e)
         {
             if (e.RowIndex < 0 || e.ColumnIndex < 1) return;
