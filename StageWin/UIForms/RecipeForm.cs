@@ -314,6 +314,7 @@ namespace StageWin.UI
         private ToolStripMenuItem _miGradeIDLE;
         private ToolStripMenuItem _miManualInspection;
         private ToolStripMenuItem _miStartBatchOffsetApply;
+        private ToolStripMenuItem _miCancelBatchOffsetApply;
 
         private bool _needRebuild = false;
         private Color _rebuildBtnBack;
@@ -375,6 +376,8 @@ namespace StageWin.UI
         public RecipeForm()
         {
             InitializeComponent();
+            KeyPreview = true;
+            KeyDown += RecipeForm_KeyDownForBatchOffset;
 
             EnableDoubleBuffer(gridScan);
             EnableDoubleBuffer(gridReview);
@@ -685,10 +688,13 @@ namespace StageWin.UI
             _miGradeIDLE = new ToolStripMenuItem("Set Grade = IDLE (Clear)");
             _miManualInspection = new ToolStripMenuItem("Set Manual Inspection");
             _miStartBatchOffsetApply = new ToolStripMenuItem("Batch Apply Offset From This Cell");
+            _miCancelBatchOffsetApply = new ToolStripMenuItem("Cancel Batch Offset Apply");
             _miGradeIDLE.Click += (s, e) => ForceSetIdleAndClearOnCurrent();
             _miManualInspection.Click += async (s, e) => { await DoManualInspectionFromVisionAsync(); };
             _miStartBatchOffsetApply.Click += (s, e) => StartBatchOffsetApplyFromCurrentCell();
-            _ctxGrade.Items.AddRange(new ToolStripItem[] { _miGradeIDLE, new ToolStripSeparator(), _miManualInspection, new ToolStripSeparator(), _miStartBatchOffsetApply, });
+            _miCancelBatchOffsetApply.Click += (s, e) => CancelBatchOffsetApplyMode(showMessage: true);
+            _ctxGrade.Items.AddRange(new ToolStripItem[] { _miGradeIDLE, new ToolStripSeparator(), _miManualInspection, new ToolStripSeparator(), _miStartBatchOffsetApply, _miCancelBatchOffsetApply, });
+            _ctxGrade.Opening += (s, e) => UpdateBatchOffsetContextMenuItems();
             // 상세 그리드에서 우클릭
             gridReviewDetail.CellMouseDown += (s, e) =>
             {
@@ -711,6 +717,33 @@ namespace StageWin.UI
                 _ctxGrade.Show(Cursor.Position);
             };
         }
+
+        private void UpdateBatchOffsetContextMenuItems()
+        {
+            if (_miStartBatchOffsetApply != null) _miStartBatchOffsetApply.Enabled = !_batchOffsetApplyMode;
+            if (_miCancelBatchOffsetApply != null) _miCancelBatchOffsetApply.Visible = _batchOffsetApplyMode;
+        }
+
+        private void RecipeForm_KeyDownForBatchOffset(object sender, KeyEventArgs e)
+        {
+            if (!_batchOffsetApplyMode || e.KeyCode != Keys.Escape) return;
+
+            CancelBatchOffsetApplyMode(showMessage: false);
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+        }
+
+        private void CancelBatchOffsetApplyMode(bool showMessage)
+        {
+            if (!_batchOffsetApplyMode) return;
+
+            EndBatchOffsetApplyMode();
+            if (showMessage)
+            {
+                MessageBox.Show(this, "일괄 offset 적용을 취소했습니다.", "Batch Apply Offset", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+        }
+
         private void StartBatchOffsetApplyFromCurrentCell()
         {
             var src = CurrentSelectedReviewRow();
@@ -734,7 +767,7 @@ namespace StageWin.UI
             gridReview?.Refresh();
 
             MessageBox.Show(this,
-                "일괄 적용할 셀들을 클릭해서 선택하세요.\r\n선택된 셀은 파란색으로 표시됩니다.\r\n선택이 끝나면 Apply Review Results 버튼을 누르세요.",
+                "일괄 적용할 셀들을 클릭하거나 드래그해서 선택하세요.\r\n선택된 셀은 파란색으로 표시됩니다.\r\n선택이 끝나면 Apply Review Results 버튼을 누르세요.\r\n취소하려면 우클릭 메뉴의 Cancel Batch Offset Apply 또는 ESC 키를 사용하세요.",
                 "Batch Apply Offset", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
@@ -926,7 +959,11 @@ namespace StageWin.UI
         {
             _batchOffsetApplyMode = false;
             _batchOffsetTargetKeys.Clear();
+            _batchOffsetDragActive = false;
+            _batchOffsetSuppressNextClick = false;
+            _batchOffsetDragVisitedKeys.Clear();
             UpdateBatchOffsetApplyButton();
+            UpdateBatchOffsetContextMenuItems();
             gridReviewDetail?.Refresh();
             gridReview?.Refresh();
         }
